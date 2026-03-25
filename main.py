@@ -7,9 +7,14 @@ import time
 import pyaudio
 import numpy as np
 from faster_whisper import WhisperModel
+import requests
+
 
 # --- CONFIGURATION ---
 print("--- UR3e Voice System Initialization ---")
+
+# --- LM STUDIO CONFIGURATION ---
+LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
 
 # TTS Config
 PIPER_EXE = "piper/piper.exe"  # Adjust to "./piper/piper.exe" if you kept the folder structure
@@ -127,6 +132,23 @@ def listen_smart():
     finally:
         p.terminate()
 
+def query_rag(prompt):
+    """Communicates with the local LM Studio / RAG Server."""
+    payload = {
+        "model": "local-model", # LM Studio usually ignores this and uses the loaded model
+        "messages": [
+            {"role": "system", "content": "You are a robotic assistant. Give concise answers."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3,
+    }
+    try:
+        # 30s timeout is safer for local LLMs which can be slow on CPU
+        response = requests.post(LM_STUDIO_URL, json=payload, timeout=30)
+        return response.json()['choices'][0]['message']['content']
+    except Exception as e:
+        return f"Communication error with brain engine: {e}"
+    
 
 # --- MAIN LOOP ---
 if __name__ == "__main__":
@@ -140,29 +162,43 @@ if __name__ == "__main__":
     
     # 3. The Main Loop
     while True:
-        #command = listen_for_command()
         command = listen_smart()
         
         if command:
             print(f"User Input: {command}")
             cmd_clean = command.lower()
 
-            # --- TERMINATION COMMAND ---
-            if "terminate program" in cmd_clean or "stop all systems" in cmd_clean:
-                print("!!! TERMINATION SIGNAL RECEIVED !!!")
+            # --- 1. TERMINATION COMMAND ---
+            if any(x in cmd_clean for x in ["terminate program", "stop all systems"]):
                 robot_speak("Terminating all systems. Goodbye.")
-                # We wait a split second for the speaker to finish before killing the process
                 time.sleep(0.5) 
-                sys.exit() # This kills the entire Python process immediately
+                sys.exit()
 
-            # --- OTHER ROBOT COMMANDS ---
+            # --- 2. RAG QUERY LOGIC ---
+            # Trigger: "Query"
+            elif "query" in cmd_clean:
+                # Remove the trigger word to get the clean question
+                clean_query = cmd_clean.replace("query", "").strip()
+                
+                print(f"🧠 Querying RAG: {clean_query}")
+                result = query_rag(clean_query)
+
+                # Check preference: "Output Voice" vs default text
+                if "output voice" in cmd_clean or "voice" in cmd_clean:
+                    clean_query = cmd_clean.replace("output voice", "").strip()
+                    clean_query = cmd_clean.replace("voice", "").strip()
+                    robot_speak(result)
+                else:
+                    print(f"\n[LLM RESPONSE]\n{result}\n")
+                    robot_speak("Displaying result on screen.")
+
+            # --- 3. ROBOT HARDWARE COMMANDS ---
             elif "home" in cmd_clean:
                 robot_speak("Moving to home.")
-                # [Insert UR3e MoveHome code here]
+                # move_robot_home() # Place your UR RTDE code here
 
             elif "status" in cmd_clean:
                 robot_speak("All systems nominal.")
 
         else:
-            # This keeps the console alive so you know it didn't crash
             print("Listening...")
