@@ -1,5 +1,5 @@
 # Python virtual environment
-ur5e_voice_env/
+.venv/
 __pycache__/
 *.pyc
 
