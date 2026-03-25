@@ -1,7 +1,14 @@
-# Python virtual environment
+# --- Python Environment ---
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
+piper/ 
+
+# --- Piper Binary Engine (Ignore these) ---
+# We don't want Windows executables or DLLs in Git
+piper.exe
+*.dll
+espeak-ng-data/
 
 # AI Models (They are too big for Git)
 models/*.onnx
