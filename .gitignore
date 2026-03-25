@@ -1,2 +1,12 @@
-.env
-.venv
+# Python virtual environment
+ur5e_voice_env/
+__pycache__/
+*.pyc
+
+# AI Models (They are too big for Git)
+models/*.onnx
+models/*.json
+
+# Audio temporary files
+*.wav
+*.mp3
