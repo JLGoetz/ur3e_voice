@@ -72,33 +72,51 @@ def robot_speak(text, speed=0.8):
     except Exception as e:
         print(f"Speech Error: {e}")
 
-def listen_for_command():
+def listen_smart():
     chunk = 1024
     fs = 16000
     p = pyaudio.PyAudio()
     
     try:
         stream = p.open(format=pyaudio.paInt16, channels=1, rate=fs, input=True, frames_per_buffer=chunk)
-        print("\n👂 Listening...")
+        print("\n👂 Listening... (Stop speaking to process)")
         
         frames = []
-        # Reduced to ~2.5 seconds for faster response
-        for _ in range(0, int(fs / chunk * 2.5)):
+        silent_chunks = 0
+        # 1.2 seconds of silence = stop (approx 18 chunks)
+        SILENCE_THRESHOLD = 18 
+        # Safety limit: 15 seconds max recording
+        MAX_CHUNKS = int(fs / chunk * 15)
+
+        while len(frames) < MAX_CHUNKS:
             data = stream.read(chunk, exception_on_overflow=False)
             frames.append(data)
+            
+            # Volume check for auto-stop
+            audio_chunk = np.frombuffer(data, dtype=np.int16)
+            if np.max(np.abs(audio_chunk)) < 500: # Adjust 500 if your room is noisy
+                silent_chunks += 1
+            else:
+                silent_chunks = 0
+            
+            # If we've recorded at least 1 second and now it's silent, stop
+            if len(frames) > 15 and silent_chunks > SILENCE_THRESHOLD:
+                break
 
         stream.stop_stream()
         stream.close()
         
-        # Convert to float32
+        # --- THE MISSING TRANSCRIPTION LOGIC ---
+        if not frames:
+            return ""
+
         audio_data = np.frombuffer(b''.join(frames), dtype=np.int16).astype(np.float32) / 32768.0
         
-        # SPEED HACK: beam_size=1 and vad_filter=True
         segments, _ = model.transcribe(
             audio_data, 
-            beam_size=1,        # Don't overthink it (HUGE speed boost)
-            vad_filter=True,    # Filter out silence/noise automatically
-            language="en"       # Force English so it doesn't spend time guessing the language
+            beam_size=1,        # Faster processing
+            vad_filter=True,    # Cleaner results
+            language="en"
         )
         
         return "".join([s.text for s in segments]).strip()
@@ -109,11 +127,6 @@ def listen_for_command():
     finally:
         p.terminate()
 
-    # Process audio
-    audio_data = np.frombuffer(b''.join(frames), dtype=np.int16).astype(np.float32) / 32768.0
-    segments, _ = model.transcribe(audio_data, beam_size=5)
-    
-    return "".join([segment.text for segment in segments]).strip()
 
 # --- MAIN LOOP ---
 if __name__ == "__main__":
@@ -127,7 +140,8 @@ if __name__ == "__main__":
     
     # 3. The Main Loop
     while True:
-        command = listen_for_command()
+        #command = listen_for_command()
+        command = listen_smart()
         
         if command:
             print(f"User Input: {command}")
