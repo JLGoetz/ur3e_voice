@@ -133,21 +133,54 @@ def listen_smart():
         p.terminate()
 
 def query_rag(prompt):
-    """Communicates with the local LM Studio / RAG Server."""
+    """
+    Communicates with LM Studio with robust error handling.
+    Returns: (response_text, is_error)
+    """
+    # --- THE MISSING PAYLOAD ---
+    # This matches the OpenAI Chat Completion API format used by LM Studio
     payload = {
-        "model": "local-model", # LM Studio usually ignores this and uses the loaded model
+        "model": "local-model", # LM Studio identifies the loaded model automatically
         "messages": [
-            {"role": "system", "content": "You are a robotic assistant. Give concise answers."},
-            {"role": "user", "content": prompt}
+            {
+                "role": "system", 
+                "content": "You are a Senior Robotics Assistant for UR e-Series. Be precise."
+            },
+            {
+                "role": "user", 
+                "content": prompt
+            }
         ],
-        "temperature": 0.3,
+        "temperature": 0.3, # Lower temperature for more deterministic/factual RAG results
+        "max_tokens": 500    # Prevents the model from rambling
     }
+
     try:
-        # 30s timeout is safer for local LLMs which can be slow on CPU
-        response = requests.post(LM_STUDIO_URL, json=payload, timeout=30)
-        return response.json()['choices'][0]['message']['content']
+        # Sending the POST request to the local server
+        response = requests.post(
+            LM_STUDIO_URL, 
+            json=payload, 
+            timeout=20  # Give it 20s to think
+        )
+        
+        # Check for HTTP errors (404, 500, etc.)
+        response.raise_for_status() 
+        
+        # Parse the JSON response
+        full_response = response.json()['choices'][0]['message']['content']
+        return full_response, False
+
+    except requests.exceptions.ConnectionError:
+        error_msg = "CONNECTION ERROR: Cannot reach LM Studio. Is the local server started on Port 1234?"
+        return error_msg, True
+        
+    except requests.exceptions.Timeout:
+        error_msg = "TIMEOUT ERROR: LM Studio took too long to respond. Check your GPU/CPU usage."
+        return error_msg, True
+        
     except Exception as e:
-        return f"Communication error with brain engine: {e}"
+        error_msg = f"SYSTEM ERROR: An unexpected error occurred: {str(e)}"
+        return error_msg, True
     
 
 # --- MAIN LOOP ---
@@ -177,20 +210,24 @@ if __name__ == "__main__":
             # --- 2. RAG QUERY LOGIC ---
             # Trigger: "Query"
             elif "query" in cmd_clean:
-                # Remove the trigger word to get the clean question
                 clean_query = cmd_clean.replace("query", "").strip()
-                
                 print(f"🧠 Querying RAG: {clean_query}")
-                result = query_rag(clean_query)
+                
+                # Capture the result AND the error status
+                result, is_error = query_rag(clean_query)
 
-                # Check preference: "Output Voice" vs default text
-                if "output voice" in cmd_clean or "voice" in cmd_clean:
-                    clean_query = cmd_clean.replace("output voice", "").strip()
-                    clean_query = cmd_clean.replace("voice", "").strip()
-                    robot_speak(result)
+                if is_error:
+                    # Print the error in red/bold for visibility
+                    print(f"\n[!] ERROR DETECTED: {result}\n")
+                    
+                    # Optionally have the robot announce the failure
+                    robot_speak("Warning. Connection to brain engine lost.")
                 else:
-                    print(f"\n[LLM RESPONSE]\n{result}\n")
-                    robot_speak("Displaying result on screen.")
+                    # Success logic
+                    if "voice" in cmd_clean or "read" in cmd_clean:
+                        robot_speak(result)
+                    else:
+                        print(f"\n[LLM RESPONSE]\n{result}\n")
 
             # --- 3. ROBOT HARDWARE COMMANDS ---
             elif "home" in cmd_clean:
